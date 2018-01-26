@@ -131,10 +131,15 @@ class MainWindow(QMainWindow, WindowMixin):
         
         if self.folderMode:
             self.allFileNames = []
-            for f in find_files(filePathName,['*.jpg', '*.jpeg', '*.bmp', '*.png']):
+            for f in find_files(filePathName,['*.json', '*.jpg', '*.jpeg', '*.bmp', '*.png']):
+                f = os.path.splitext(f)[0]
                 self.allFileNames.append(f)   
+                
             if self.allFileNames:
-                self.filename = self.allFileNames[0]
+                self.allFileNames.sort()
+                self.allFileNames = list(set(self.allFileNames))
+                self.filename = self.filenameImageLabeled(self.allFileNames[0])
+                self.output = self.allFileNames[0] + '.json'                
         else:
             self.filename = self.filePathName
 
@@ -322,7 +327,7 @@ class MainWindow(QMainWindow, WindowMixin):
                 recentFiles=QMenu('Open &Recent'),
                 labelList=labelMenu)
 
-        if self.folderMode:
+        if not self.folderMode:
             addActions(self.menus.file,
                 (open, self.menus.recentFiles, save, saveAs, close, None, quit))
         else:
@@ -352,14 +357,24 @@ class MainWindow(QMainWindow, WindowMixin):
             action('&Move here', self.moveShape)))
 
         self.tools = self.toolbar('Tools')
-        self.actions.beginner = (
-            open, save, None, create, copy, delete, None,
-            zoomIn, zoom, zoomOut, fitWindow, fitWidth)
-
-        self.actions.advanced = (
-            open, save, None,
-            createMode, editMode, None,
-            hideAll, showAll)
+        if not self.folderMode:
+            self.actions.beginner = (
+                open, save, None, create, copy, delete, None,
+                zoomIn, zoom, zoomOut, fitWindow, fitWidth)
+    
+            self.actions.advanced = (
+                open, save, None,
+                createMode, editMode, None,
+                hideAll, showAll)
+        else:
+            self.actions.beginner = (
+                save, None, create, copy, delete, None,
+                zoomIn, zoom, zoomOut, fitWindow, fitWidth)
+    
+            self.actions.advanced = (
+                save, None,
+                createMode, editMode, None,
+                hideAll, showAll)            
 
         self.statusBar().showMessage('%s started.' % __appname__)
         self.statusBar().show()
@@ -408,7 +423,15 @@ class MainWindow(QMainWindow, WindowMixin):
         #self.firstStart = True
         #if self.firstStart:
         #    QWhatsThis.enterWhatsThisMode()
-        
+    def filenameImageLabeled(self, pathfile):
+        def exists(filename):
+            return os.path.exists(str(filename))        
+        extension = ['.json','.jpg', '.jpeg', '.bmp', '.png']
+        for ext in extension:
+            filename = pathfile + ext
+            if exists(filename):
+                return filename;
+         
     def addFilesListWidget(self):
         self.filesList = QListWidget()
         self.filesList.itemActivated.connect(self.filesSelectionChanged)
@@ -435,7 +458,8 @@ class MainWindow(QMainWindow, WindowMixin):
         #print item.text()
         self.saveFile();
         self.closeFile();
-        self.filename = item.text()
+        self.filename = self.filenameImageLabeled(item.text())
+        self.output = item.text() + '.json'
         self.loadFile(self.filename)    
         self.populateModeActions()
     
