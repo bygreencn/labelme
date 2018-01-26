@@ -494,6 +494,9 @@ class Canvas(QWidget):
         if PYQT5:
             mods = ev.modifiers()
             delta = ev.pixelDelta()
+            if delta.x() == 0 and delta.y() == 0:
+                delta = ev.angleDelta()
+               
             if Qt.ControlModifier == int(mods):  # with Ctrl/Command key
                 # zoom
                 self.zoomRequest.emit(delta.y())
