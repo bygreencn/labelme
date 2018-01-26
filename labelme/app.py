@@ -66,7 +66,29 @@ __appname__ = 'labelme'
 # - [low,maybe] Sortable label list.
 # - Zoom is too "steppy".
 
+import fnmatch
+import functools
+import itertools
+import os
 
+# Remove the annotations if you're not on Python3
+def find_files(dir_path, patterns=['*']):
+    """
+    Returns a generator yielding files matching the given patterns
+    :type dir_path: str
+    :type patterns: [str]
+    :rtype : [str]
+    :param dir_path: Directory to search for files/directories under. Defaults to current dir.
+    :param patterns: Patterns of files to search for. Defaults to ["*"]. Example: ["*.json", "*.xml"]
+    """
+    path = dir_path or "."
+    path_patterns = patterns or ["*"]
+
+    for root_dir, dir_names, file_names in os.walk(path):
+        filter_partial = functools.partial(fnmatch.filter, file_names)
+
+        for file_name in itertools.chain(*map(filter_partial, path_patterns)):
+            yield os.path.join(root_dir, file_name)
 ### Utility functions and classes.
 
 class WindowMixin(object):
@@ -90,7 +112,7 @@ class WindowMixin(object):
 class MainWindow(QMainWindow, WindowMixin):
     FIT_WINDOW, FIT_WIDTH, MANUAL_ZOOM = 0, 1, 2
 
-    def __init__(self, filename=None, output=None):
+    def __init__(self, folderMode=False, filePathName=None, output=None):
         super(MainWindow, self).__init__()
         self.setWindowTitle(__appname__)
 
@@ -101,6 +123,20 @@ class MainWindow(QMainWindow, WindowMixin):
         self._beginner = True
         self.screencastViewer = "firefox"
         self.screencast = "screencast.ogv"
+        
+        
+        self.folderMode=folderMode
+        self.filePathName=filePathName
+        self.output = output  
+        
+        if self.folderMode:
+            self.allFileNames = []
+            for f in find_files(filePathName,['*.jpg', '*.jpeg', '*.bmp', '*.png']):
+                self.allFileNames.append(f)   
+            if self.allFileNames:
+                self.filename = self.allFileNames[0]
+        else:
+            self.filename = self.filePathName
 
         # Main widgets and related state.
         self.labelDialog = LabelDialog(parent=self)
@@ -123,11 +159,12 @@ class MainWindow(QMainWindow, WindowMixin):
         self.labelListContainer.setLayout(listLayout)
         listLayout.addWidget(self.editButton)#, 0, Qt.AlignCenter)
         listLayout.addWidget(self.labelList)
-
-
         self.dock = QDockWidget('Polygon Labels', self)
         self.dock.setObjectName('Labels')
         self.dock.setWidget(self.labelListContainer)
+        
+        if self.folderMode:
+            self.addFilesListWidget()
 
         self.zoomWidget = ZoomWidget()
         self.colorDialog = ColorDialog(parent=self)
@@ -151,9 +188,11 @@ class MainWindow(QMainWindow, WindowMixin):
 
         self.setCentralWidget(scroll)
         self.addDockWidget(Qt.RightDockWidgetArea, self.dock)
-        self.dockFeatures = QDockWidget.DockWidgetClosable\
-                          | QDockWidget.DockWidgetFloatable
-        self.dock.setFeatures(self.dock.features() ^ self.dockFeatures)
+        #self.dockFeatures = QDockWidget.DockWidgetClosable | QDockWidget.DockWidgetFloatable
+        #self.dock.setFeatures(self.dock.features() ^ self.dockFeatures)
+        
+        if self.folderMode:
+            self.addDockWidget(Qt.RightDockWidgetArea, self.filedock)    
 
         # Actions
         action = partial(newAction, self)
@@ -245,6 +284,11 @@ class MainWindow(QMainWindow, WindowMixin):
         labels = self.dock.toggleViewAction()
         labels.setText('Show/Hide Label Panel')
         labels.setShortcut('Ctrl+Shift+L')
+        
+        if self.folderMode:
+            files = self.filedock.toggleViewAction()
+            files.setText('Show/Hide Files Panel')
+            files.setShortcut('Ctrl+Shift+F')        
 
         # Lavel list context menu.
         labelMenu = QMenu()
@@ -278,14 +322,26 @@ class MainWindow(QMainWindow, WindowMixin):
                 recentFiles=QMenu('Open &Recent'),
                 labelList=labelMenu)
 
-        addActions(self.menus.file,
+        if self.folderMode:
+            addActions(self.menus.file,
                 (open, self.menus.recentFiles, save, saveAs, close, None, quit))
+        else:
+            addActions(self.menus.file,
+                (self.menus.recentFiles, save, saveAs, close, None, quit))
         addActions(self.menus.help, (help,))
-        addActions(self.menus.view, (
-            labels, advancedMode, None,
-            hideAll, showAll, None,
-            zoomIn, zoomOut, zoomOrg, None,
-            fitWindow, fitWidth))
+        if self.folderMode:
+            addActions(self.menus.view, (
+                labels, files, advancedMode, None,
+                hideAll, showAll, None,
+                zoomIn, zoomOut, zoomOrg, None,
+                fitWindow, fitWidth))
+        else:
+            addActions(self.menus.view, (
+                labels, advancedMode, None,
+                hideAll, showAll, None,
+                zoomIn, zoomOut, zoomOrg, None,
+                fitWindow, fitWidth))            
+            
 
         self.menus.file.aboutToShow.connect(self.updateFileMenu)
 
@@ -310,9 +366,8 @@ class MainWindow(QMainWindow, WindowMixin):
 
         # Application state.
         self.image = QImage()
-        self.filename = filename
+        
         self.labeling_once = output is not None
-        self.output = output
         self.recentFiles = []
         self.maxRecent = 7
         self.lineColor = None
@@ -353,6 +408,37 @@ class MainWindow(QMainWindow, WindowMixin):
         #self.firstStart = True
         #if self.firstStart:
         #    QWhatsThis.enterWhatsThisMode()
+        
+    def addFilesListWidget(self):
+        self.filesList = QListWidget()
+        self.filesList.itemActivated.connect(self.filesSelectionChanged)
+        self.filesList.itemSelectionChanged.connect(self.filesSelectionChanged)
+    
+        filesLayout = QVBoxLayout()
+        filesLayout.setContentsMargins(0, 0, 0, 0)
+        filesLayout.addWidget(self.filesList)
+        self.filesListContainer = QWidget()
+        self.filesListContainer.setLayout(filesLayout)
+
+        self.filedock = QDockWidget('Files', self)
+        self.filedock.setObjectName('Files')
+        self.filedock.setWidget(self.filesListContainer)  
+        
+        for filename in self.allFileNames:
+            item = QListWidgetItem("{}".format(filename))
+            self.filesList.addItem(item)        
+        
+    def filesSelectionChanged(self):
+        item = self.filesList.currentItem()
+        #print self.filesList.currentRow()
+        #print self.filesList.currentItem().text()
+        #print item.text()
+        self.saveFile();
+        self.closeFile();
+        self.filename = item.text()
+        self.loadFile(self.filename)    
+        self.populateModeActions()
+    
 
     ## Support Functions ##
 
@@ -367,9 +453,9 @@ class MainWindow(QMainWindow, WindowMixin):
         if value:
             self.actions.createMode.setEnabled(True)
             self.actions.editMode.setEnabled(False)
-            self.dock.setFeatures(self.dock.features() | self.dockFeatures)
-        else:
-            self.dock.setFeatures(self.dock.features() ^ self.dockFeatures)
+            #self.dock.setFeatures(self.dock.features() | self.dockFeatures)
+        #else:
+        #    self.dock.setFeatures(self.dock.features() ^ self.dockFeatures)
 
     def populateModeActions(self):
         if self.beginner():
@@ -832,8 +918,8 @@ class MainWindow(QMainWindow, WindowMixin):
     # Message Dialogs. #
     def hasLabels(self):
         if not self.itemsToShapes:
-            self.errorMessage('No objects labeled',
-                    'You must label at least one object to save the file.')
+            #self.errorMessage('No objects labeled',
+            #        'You must label at least one object to save the file.')
             return False
         return True
 
@@ -948,17 +1034,25 @@ def read(filename, default=None):
 def main():
     """Standard boilerplate Qt application code."""
     parser = argparse.ArgumentParser()
-    parser.add_argument('filename', nargs='?', help='image or label filename')
+    parser.add_argument('-f','--filename', nargs='?', help='image or label filename')
+    parser.add_argument('-p','--foldername', nargs='?', help='image or label foldername')
     parser.add_argument('-O', '--output', help='output label name')
     args = parser.parse_args()
 
-    filename = args.filename
+    if args.foldername is not None:
+        pathName = args.foldername
+        foldermode= True
+    else:
+        pathName = args.filename
+        foldermode= False        
     output = args.output
 
     app = QApplication(sys.argv)
     app.setApplicationName(__appname__)
     app.setWindowIcon(newIcon("app"))
-    win = MainWindow(filename, output)
-    win.show()
+    win = MainWindow(foldermode, pathName, output)
+    win.showMaximized()
     win.raise_()
     sys.exit(app.exec_())
+
+main()
